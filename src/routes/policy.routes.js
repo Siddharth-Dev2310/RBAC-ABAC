@@ -10,6 +10,7 @@ deletePolicy,
 togglePolicyStatus,
 getPoliciesByRole,
 getPoliciesByAction,
+testPolicy
 } from "../controller/policy.controller.js";
 
 const router = Router();
@@ -71,6 +72,14 @@ router.delete(
 "/:id",
 rbacMiddleware(["superadmin"]),
 deletePolicy
+);
+
+// Add test endpoint
+router.post(
+  "/test",
+  authMiddleware,
+  rbacMiddleware(["admin", "superadmin"]),
+  testPolicy
 );
 
 export default router;

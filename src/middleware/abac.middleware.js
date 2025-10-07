@@ -1,6 +1,11 @@
 import { ApiError } from "../utils/ApiError.utils.js";
 import { asyncHandler } from "../utils/asyncHandler.utils.js";
 import { Policy } from "../models/policy.models.js";
+import {
+  evaluateSimpleConditions,
+  evaluateComplexPolicy,
+  buildContext,
+} from "../utils/policyEvaluator.utils.js";
 
 /**
  * ABAC Middleware: Check if the user meets attribute-based policy conditions
@@ -34,30 +39,19 @@ export const abacMiddleware = (action) =>
         return true;
       }
 
-      // Check ownResource condition (user can only access their own resource)
-      if (conditions.ownResource && req.params?.id !== String(user._id)) {
-        return false;
+      // Check if conditions is an array (complex policy) or object (simple policy)
+      if (Array.isArray(conditions)) {
+        // Use advanced policy evaluator for complex conditions
+        const context = buildContext(req, user);
+        const result = evaluateComplexPolicy(
+          { conditions, effect: policy.effect || "allow" },
+          context
+        );
+        return result.allowed;
+      } else {
+        // Use simple condition evaluation for object-based conditions
+        return evaluateSimpleConditions(conditions, req, user);
       }
-
-      // Check department condition
-      if (conditions.department && conditions.department !== user.department) {
-        return false;
-      }
-
-      // Check location condition
-      if (conditions.location && conditions.location !== user.location) {
-        return false;
-      }
-
-      // Check sensitivity condition (if resource is fetched)
-      if (conditions.sensitivity && req.resource?.sensitivity) {
-        if (conditions.sensitivity !== req.resource.sensitivity) {
-          return false;
-        }
-      }
-
-      // All conditions satisfied
-      return true;
     });
 
     if (!allowed) {

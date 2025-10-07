@@ -4,6 +4,10 @@ import { ApiError } from "../utils/ApiError.utils.js";
 import { ApiResponse } from "../utils/ApiResponse.utils.js";
 import { asyncHandler } from "../utils/asyncHandler.utils.js";
 import { logAuditEvent } from "../utils/auditLogger.utils.js";
+import {
+  evaluateComplexPolicy,
+  buildContext,
+} from "../utils/policyEvaluator.utils.js";
 
 /**
  * 📋 Get all policies (with filtering)
@@ -91,20 +95,19 @@ export const createPolicy = asyncHandler(async (req, res) => {
   }
 
   console.log("Creating policy with data:", role, action, conditions, effect);
-  
 
   // Validate role exists
   const roleExists = await Role.findOne({ name: role });
 
   console.log("Role exists:", roleExists);
-  
+
   if (!roleExists) {
     throw new ApiError(404, "Role not found");
   }
 
   // Check if similar policy already exists
   const existingPolicy = await Policy.findOne({
-    role : roleExists._id,
+    role: roleExists._id,
     action,
     effect: effect || "allow",
   });
@@ -170,8 +173,6 @@ export const updatePolicy = asyncHandler(async (req, res) => {
     }
   }
 
-
-  
   // Update fields
   if (role) policy.role = roleExists._id;
   if (action) policy.action = action;
@@ -315,6 +316,64 @@ export const getPoliciesByAction = asyncHandler(async (req, res) => {
       )
     );
 });
+
+/**
+ * 🧪 Test policy evaluation
+ * @route POST /api/policies/test
+ * @access Admin, SuperAdmin
+ */
+export const testPolicy = asyncHandler(async (req, res) => {
+  const { policyId, testContext } = req.body;
+
+  if (!policyId) {
+    throw new ApiError(400, "Policy ID is required");
+  }
+
+  const policy = await Policy.findById(policyId).populate("role", "name");
+  if (!policy) {
+    throw new ApiError(404, "Policy not found");
+  }
+
+  // Build context from provided test data or current request
+  const context = testContext || buildContext(req, req.user);
+
+  // Evaluate the policy
+  const result = evaluateComplexPolicy(
+    {
+      conditions: policy.conditions,
+      effect: policy.effect,
+      name: `${policy.role.map((r) => r.name).join(", ")} - ${policy.action}`,
+    },
+    context
+  );
+
+  // Log audit event
+  await logAuditEvent({
+    userId: req.user._id,
+    action: "test:policy",
+    resource: policyId,
+    status: result.allowed ? "allowed" : "denied",
+    metadata: { result, context },
+  });
+
+  res.status(200).json(
+    new ApiResponse(
+      200,
+      {
+        policy: {
+          id: policy._id,
+          action: policy.action,
+          effect: policy.effect,
+          conditions: policy.conditions,
+        },
+        evaluation: result,
+        context,
+      },
+      "Policy evaluation completed"
+    )
+  );
+});
+
 
 /**
  * 🌱 Seeds default ABAC policies (attribute-based)
